@@ -3,9 +3,8 @@ import { Badges, type BadgeDefinition } from "@common/definitions/badges";
 import { Emotes } from "@common/definitions/emotes";
 import { ArmorType } from "@common/definitions/items/armors";
 import { type DualGunNarrowing } from "@common/definitions/items/guns";
-import { Scopes } from "@common/definitions/items/scopes";
 import { Skins } from "@common/definitions/items/skins";
-import type { ColorKeys, Mode, ModeDefinition } from "@common/definitions/modes";
+import type { ColorKeys, ModeDefinition, ModeName } from "@common/definitions/modes";
 import { Modes } from "@common/definitions/modes";
 import type { JoinedData } from "@common/packets/joinedPacket";
 import { JoinPacket } from "@common/packets/joinPacket";
@@ -73,9 +72,7 @@ type ObjectClassMapping = {
     readonly [ObjectCategory.SyncedParticle]: typeof SyncedParticle
 };
 
-const ObjectClassMapping: ObjectClassMapping = Object.freeze<{
-    readonly [K in ObjectCategory]: new (id: number, data: ObjectsNetData[K]) => InstanceType<ObjectClassMapping[K]>
-}>({
+const ObjectClassMapping: ObjectClassMapping = Object.freeze({
     [ObjectCategory.Player]: Player,
     [ObjectCategory.Obstacle]: Obstacle,
     [ObjectCategory.DeathMarker]: DeathMarker,
@@ -85,6 +82,8 @@ const ObjectClassMapping: ObjectClassMapping = Object.freeze<{
     [ObjectCategory.Parachute]: Parachute,
     [ObjectCategory.Projectile]: Projectile,
     [ObjectCategory.SyncedParticle]: SyncedParticle
+} satisfies {
+    readonly [K in ObjectCategory]: new (id: number, data: ObjectsNetData[K]) => InstanceType<ObjectClassMapping[K]>
 });
 
 type ObjectMapping = {
@@ -118,13 +117,13 @@ export const Game = new (class Game {
 
     teamMode = false;
 
-    _modeName: Mode | undefined;
-    get modeName(): Mode {
+    _modeName: ModeName | undefined;
+    get modeName(): ModeName {
         if (this._modeName === undefined) throw new Error("modeName accessed before initialization");
         return this._modeName;
     }
 
-    set modeName(modeName: Mode) {
+    set modeName(modeName: ModeName) {
         this._modeName = modeName;
         this._mode = Modes[this.modeName];
 
@@ -203,7 +202,6 @@ export const Game = new (class Game {
         await setUpUI();
         await fetchServerData();
         this.gasRender = new GasRender(PIXI_SCALE);
-        SoundManager.init();
         MapManager.init();
         CameraManager.init();
         GasManager.init();
@@ -301,7 +299,7 @@ export const Game = new (class Game {
 
         void Promise.all([
             initPixi(),
-            SoundManager.loadSounds(),
+            SoundManager.init(),
             finalizeUI()
         ]).then(() => {
             unlockPlayButtons();
@@ -516,7 +514,7 @@ export const Game = new (class Game {
                             soundID = "backpack_pickup";
                             break;
                         case ItemType.Throwable:
-                            soundID = "throwable_pickup";
+                            soundID = "throwable_switch";
                             break;
                         case ItemType.Perk:
                             soundID = "pickup";
@@ -573,44 +571,39 @@ export const Game = new (class Game {
     }
 
     async endGame(): Promise<void> {
-        const ui = UIManager.ui;
-
         return await new Promise(resolve => {
-            UIManager.fadeout();
+            const ui = UIManager.ui;
+
+            ui.gameMenu.fadeOut(250);
+            ui.splashOptions.addClass("loading");
+            ui.loaderText.text("");
 
             SoundManager.stopAll();
 
             ui.splashUi.fadeIn(400, () => {
-                this.pixi.stop();
-                ScreenRecordManager.endRecording();
-                void this.music?.play();
-
-                UIManager.resetUI();
-
                 this.gameStarted = false;
                 this._socket?.close();
+                this.pixi.stop();
+                void this.music?.play();
 
-                // reset stuff
                 for (const object of this.objects) object.destroy();
                 for (const plane of this.planes) plane.destroy();
                 this.objects.clear();
                 this.bullets.clear();
                 this.planes.clear();
-                CameraManager.container.removeChildren();
-                ParticleManager.clear();
-
-                UIManager.resetCache();
-
-                MapManager.reset();
-
-                GasManager.time = undefined;
-
                 this.playerNames.clear();
                 this._timeouts.clear();
 
-                CameraManager.zoom = Scopes.definitions[0].zoomLevel;
+                CameraManager.reset();
+                GasManager.reset();
+                MapManager.reset();
+                ParticleManager.reset();
+                ScreenRecordManager.reset();
+                UIManager.reset();
+
                 updateDisconnectTime();
                 resetPlayButtons();
+
                 if (teamSocket) ui.createTeamMenu.fadeIn(250, resolve);
                 else resolve();
             });
